@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
@@ -14,12 +15,24 @@ import (
 	"github.com/gin-gonic/contrib/sessions"
 	"github.com/gin-gonic/gin"
 	"github.com/joho/godotenv"
+	"google.golang.org/api/iterator"
 	"google.golang.org/api/option"
 )
 
 type UserAuth struct {
 	Email    string `json:"email"`
 	Password string `json:"password"`
+}
+
+type DishCreateRequest struct {
+	Name   string `json:"name"`
+	Points int    `json:"points"`
+}
+
+type Dish struct {
+	Id     string `json:"id"`
+	Name   string `json:"name"`
+	Points int    `json:"points"`
 }
 
 func main() {
@@ -107,6 +120,23 @@ func main() {
 				"message":          "You are signed in.",
 				"currentUserEmail": loginUserEmail,
 			})
+		})
+
+		api.GET("/dish", func(c *gin.Context) {
+			dishes, err := GetDishes(client, ctx)
+			if err == nil {
+				c.JSON(http.StatusOK, gin.H{
+					"value": dishes,
+				})
+				return
+			}
+			c.JSON(http.StatusOK, gin.H{
+				"message": "error",
+			})
+		})
+
+		api.POST("/dish", func(c *gin.Context) {
+			CreateDish(c, authClient, client, ctx)
 		})
 
 		api.GET("/signout", UserSignout)
@@ -232,4 +262,83 @@ func FindUserEmailFromSession(c *gin.Context, authClient *auth.Client, ctx conte
 		return "", getUserErr
 	}
 	return u.Email, getUserErr
+}
+
+func FindUserUidFromSession(c *gin.Context, authClient *auth.Client, ctx context.Context) (string, error) {
+	session := sessions.Default(c)
+	userEmail := session.Get("gin_session_user_email")
+	if userEmail == nil {
+		return "", fmt.Errorf("session is nil")
+	}
+	// user, userFindErr := FindUserByEmail(client, ctx, userEmail.(string))
+	u, getUserErr := authClient.GetUserByEmail(ctx, userEmail.(string))
+	if getUserErr != nil {
+		log.Fatalf("error getting user by email %s: %v\n", userEmail, getUserErr)
+		c.JSON(http.StatusBadRequest, gin.H{"error": getUserErr.Error()})
+		return "", getUserErr
+	}
+	return u.UID, getUserErr
+}
+
+func CreateDish(c *gin.Context, authClient *auth.Client, client *firestore.Client, ctx context.Context) error {
+	var json DishCreateRequest
+	if err := c.ShouldBindJSON(&json); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return nil
+	}
+
+	sessionUserEmail, sessionUserErr := FindUserEmailFromSession(c, authClient, ctx)
+	if sessionUserErr != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": sessionUserErr.Error()})
+		return nil
+	}
+
+	userUid, uidErr := FindUserUidFromSession(c, authClient, ctx)
+	if uidErr != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": uidErr.Error()})
+	}
+
+	fmt.Printf("Create dish with name: %s author email: %s\n", json.Name, sessionUserEmail)
+
+	_, _, errInsert := client.Collection("dishes").Add(ctx, map[string]interface{}{
+		"name":        json.Name,
+		"UserId":      userUid,
+		"Points":      json.Points,
+		"authorEmail": sessionUserEmail,
+	})
+	if errInsert != nil {
+		log.Fatalf("Failed adding: %v", errInsert)
+		c.JSON(http.StatusBadRequest, gin.H{"error": errInsert.Error()})
+		return nil
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "successful"})
+	return nil
+}
+
+func GetDishes(client *firestore.Client, ctx context.Context) ([]Dish, error) {
+	dishes := []Dish{}
+	// var iter *firestore.DocumentIterator
+
+	iter := client.Collection("dishes").Documents(ctx)
+
+	for {
+		doc, err := iter.Next()
+		if err == iterator.Done {
+			break
+		}
+
+		// Convert the map to JSON
+		jsonData, _ := json.Marshal(doc.Data())
+
+		// Convert the JSON to a struct
+		var structData Dish
+		json.Unmarshal(jsonData, &structData)
+
+		structData.Id = doc.Ref.ID
+
+		dishes = append(dishes, structData)
+	}
+
+	return dishes, nil
 }
