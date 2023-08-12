@@ -94,6 +94,21 @@ func main() {
 			UserSignin(c, authClient, ctx)
 		})
 
+		api.GET("/is-logged-in", func(c *gin.Context) {
+			loginUserEmail, err := FindUserEmailFromSession(c, authClient, ctx)
+			if err != nil {
+				c.JSON(http.StatusOK, gin.H{
+					"message":          "Not signed in.",
+					"currentUserEmail": "",
+				})
+				return
+			}
+			c.JSON(http.StatusOK, gin.H{
+				"message":          "You are signed in.",
+				"currentUserEmail": loginUserEmail,
+			})
+		})
+
 		api.GET("/signout", UserSignout)
 	}
 
@@ -180,7 +195,7 @@ func UserSignin(c *gin.Context, authClient *auth.Client, ctx context.Context) {
 	log.Printf("Successfully fetched user data: %v\n", u.UID)
 	fmt.Println("ログインできました")
 	session := sessions.Default(c)
-	session.Set("gin_session_username", u.Email)
+	session.Set("gin_session_user_email", u.Email)
 
 	// c.SetCookie("gin_cookie_username", user.Email, 3600, "/", "localhost", false, true)
 
@@ -201,4 +216,20 @@ func UserSignout(c *gin.Context) {
 	session.Save()
 	log.Print("Saved Empty Session, Redirecting to top page...")
 	c.Redirect(http.StatusFound, "/")
+}
+
+func FindUserEmailFromSession(c *gin.Context, authClient *auth.Client, ctx context.Context) (string, error) {
+	session := sessions.Default(c)
+	userEmail := session.Get("gin_session_user_email")
+	if userEmail == nil {
+		return "", fmt.Errorf("session is nil")
+	}
+	// user, userFindErr := FindUserByEmail(client, ctx, userEmail.(string))
+	u, getUserErr := authClient.GetUserByEmail(ctx, userEmail.(string))
+	if getUserErr != nil {
+		log.Fatalf("error getting user by email %s: %v\n", userEmail, getUserErr)
+		c.JSON(http.StatusBadRequest, gin.H{"error": getUserErr.Error()})
+		return "", getUserErr
+	}
+	return u.Email, getUserErr
 }
