@@ -1,0 +1,64 @@
+{{ define "navbar" }}
+<nav class="px-2 sm:px-4 py-2.5 rounded">
+  <div class="container flex flex-wrap items-center justify-between mx-auto">
+    <a href="/" class="flex items-center">
+        <span class="self-center text-xl font-semibold whitespace-nowrap text-white">Top</span>
+    </a>
+    <button type="button" id="menu-toggle-button" class="block md:hidden items-center p-2 ml-3 text-sm text-gray-100 rounded-lg">
+      <span class="sr-only">Open main menu</span>
+      <svg class="w-6 h-6" fill="currentColor" viewBox="0 0 20 20" xmlns="http://www.w3.org/2000/svg"><path fill-rule="evenodd" d="M3 5a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zM3 10a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zM3 15a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1z" clip-rule="evenodd"></path></svg>
+    </button>
+    <div class="hidden w-full md:block md:w-auto" id="navbar">
+      <ul class="font-medium flex flex-col p-4 mt-4 md:p-1 rounded-lg md:flex-row">
+        <li>  
+          <a href="/home" class="block py-2 pl-3 pr-4 md:m-2 md:p-2 text-white bg-blue-700 bg-transparent rounded" aria-current="page">
+              Home
+          </a>
+        </li>
+        <li>
+          <a id="signinlink" href="/signin" class="block py-2 pl-3 pr-4 md:m-2 md:p-2 text-white bg-blue-700 bg-transparent rounded" aria-current="page">
+              Login
+          </a>
+          <a id="signoutlink" href="/api/signout" class="block py-2 pl-3 pr-4 md:m-2 md:p-2 text-white bg-blue-700 bg-transparent rounded" aria-current="page">
+              Logout
+          </a>
+        </li>
+      </ul>
+    </div>
+  </div>
+</nav>
+<script>
+  async function CheckCurrentUser() {
+    const res = await fetch('/api/is-logged-in', { 
+            method: 'GET' 
+        });
+    const currUser = await res.json();
+    if (currUser.currentUserEmail) {
+      return currUser.currentUserEmail
+    } else {
+      return ""
+    }
+  }
+
+  const button = document.querySelector('#menu-toggle-button'); // Hamburger Icon
+  const menu = document.querySelector('#navbar'); // Menu
+
+  button.addEventListener('click', () => {
+    menu.classList.toggle('hidden');
+  });
+
+  CheckCurrentUser().then(
+    ret => {
+      if (ret !== "") {
+        // if user is logged in, hide signin link
+        const signinlink = document.getElementById("signinlink")
+        signinlink.classList.toggle('hidden')
+      } else {
+        // if not logged in, hide signout link
+        const signoutlink = document.getElementById("signoutlink")
+        signoutlink.classList.toggle('hidden')
+      }
+    }
+  ).catch()
+</script>
+{{ end }}

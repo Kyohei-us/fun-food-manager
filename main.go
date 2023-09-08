@@ -25,14 +25,24 @@ type UserAuth struct {
 }
 
 type DishCreateRequest struct {
-	Name   string `json:"name"`
-	Points int    `json:"points"`
+	Name     string `json:"name"`
+	Category string `json:"category"`
+	Points   int    `json:"points"`
+	Date     string `json:"date"`
+}
+
+type DishGetRequestParams struct {
+	AuthorEmail string `json:"authoremail"`
+	Date        string `json:"date"`
 }
 
 type Dish struct {
-	Id     string `json:"id"`
-	Name   string `json:"name"`
-	Points int    `json:"points"`
+	Id          string `json:"id"`
+	Name        string `json:"name"`
+	Category    string `json:"category"`
+	Points      int    `json:"points"`
+	AuthorEmail string `json:"authoremail"`
+	Date        string `json:"date"`
 }
 
 func main() {
@@ -123,7 +133,11 @@ func main() {
 		})
 
 		api.GET("/dish", func(c *gin.Context) {
-			dishes, err := GetDishes(client, ctx)
+			var json DishGetRequestParams
+			json.AuthorEmail = c.Query("authoremail")
+			json.Date = c.Query("date")
+
+			dishes, err := GetDishes(client, ctx, json)
 			if err == nil {
 				c.JSON(http.StatusOK, gin.H{
 					"value": dishes,
@@ -141,6 +155,22 @@ func main() {
 
 		api.GET("/signout", UserSignout)
 	}
+
+	r.GET("/signup", func(c *gin.Context) {
+		c.HTML(http.StatusOK, "signup.html", gin.H{})
+	})
+
+	r.GET("/signin", func(c *gin.Context) {
+		c.HTML(http.StatusOK, "signin.html", gin.H{})
+	})
+
+	r.GET("/", func(c *gin.Context) {
+		c.HTML(http.StatusOK, "add-dish.html", gin.H{})
+	})
+
+	r.GET("/add-dish", func(c *gin.Context) {
+		c.HTML(http.StatusOK, "add-dish.html", gin.H{})
+	})
 
 	r.NoRoute(func(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{
@@ -223,7 +253,7 @@ func UserSignin(c *gin.Context, authClient *auth.Client, ctx context.Context) {
 		return
 	}
 	log.Printf("Successfully fetched user data: %v\n", u.UID)
-	fmt.Println("ログインできました")
+	fmt.Println("ログインできました: ", u.Email)
 	session := sessions.Default(c)
 	session.Set("gin_session_user_email", u.Email)
 
@@ -303,8 +333,10 @@ func CreateDish(c *gin.Context, authClient *auth.Client, client *firestore.Clien
 	_, _, errInsert := client.Collection("dishes").Add(ctx, map[string]interface{}{
 		"name":        json.Name,
 		"UserId":      userUid,
+		"Category":    json.Category,
 		"Points":      json.Points,
 		"authorEmail": sessionUserEmail,
+		"date":        json.Date,
 	})
 	if errInsert != nil {
 		log.Fatalf("Failed adding: %v", errInsert)
@@ -316,11 +348,12 @@ func CreateDish(c *gin.Context, authClient *auth.Client, client *firestore.Clien
 	return nil
 }
 
-func GetDishes(client *firestore.Client, ctx context.Context) ([]Dish, error) {
+func GetDishes(client *firestore.Client, ctx context.Context, getDishesParam DishGetRequestParams) ([]Dish, error) {
 	dishes := []Dish{}
 	// var iter *firestore.DocumentIterator
+	fmt.Println(getDishesParam)
 
-	iter := client.Collection("dishes").Documents(ctx)
+	iter := client.Collection("dishes").Where("authorEmail", "==", getDishesParam.AuthorEmail).Where("date", "==", getDishesParam.Date).Documents(ctx)
 
 	for {
 		doc, err := iter.Next()
@@ -339,6 +372,8 @@ func GetDishes(client *firestore.Client, ctx context.Context) ([]Dish, error) {
 
 		dishes = append(dishes, structData)
 	}
+
+	fmt.Println(dishes)
 
 	return dishes, nil
 }

@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, minimum-scale=1" />
+    <title>Add dish</title>
+
+    <!-- Load Tailwindcss -->
+    <link href="/static/output.css" rel="stylesheet">
+</head>
+
+<script>
+  async function CheckCurrentUser() {
+    const res = await fetch('/api/is-logged-in', { 
+            method: 'GET' 
+        });
+    const currUser = await res.json();
+    if (currUser.currentUserEmail) {
+      return currUser.currentUserEmail
+    } else {
+      return ""
+    }
+  }
+
+    function createDish() {
+        const name = document.getElementById("name").value;
+        const category = document.getElementById("category").value;
+        const points = Number(document.getElementById("points").value);
+        const date = document.getElementById("date").value;
+
+        fetch('/api/dish', { 
+            method: 'POST',
+            body: JSON.stringify({
+            "name": name,
+            "category": category,
+            "points": points,
+            "date": date,
+        }) })
+            .then((response) => response.json())
+            .then((data) => console.log(data))
+            .catch(error => console.error(error));
+        // window.location.replace("/");
+    }
+
+    async function getDish() {
+        const dateFilter = document.getElementById("dateFilter").value;
+        const authorEmail = await CheckCurrentUser();
+        let res;
+        if (authorEmail) {
+            if (dateFilter) {
+                res = await fetch('/api/dish?authoremail=' + authorEmail + "&date=" + dateFilter, { 
+                    method: 'GET' 
+                });
+            } else {
+                res = await fetch('/api/dish?authoremail=' + authorEmail, { 
+                    method: 'GET' 
+                });
+            }
+        } else {
+            if (dateFilter) {
+                res = await fetch('/api/dish?date=' + dateFilter, { 
+                    method: 'GET' 
+                });
+            } else {
+                res = await fetch('/api/dish', { 
+                    method: 'GET' 
+                }); 
+            }
+        }
+        const dish = await res.json();
+
+        if (dish.error) {
+            return []
+        }
+
+        return dish.value
+    }
+
+    async function renderDish() {
+        const dish = await getDish();
+        console.log(dish)
+        const dishBoard = document.getElementById("dish");
+
+        for (const sp of dish) {
+            const wrapperNode = document.createElement("div");
+            const node = document.createElement("div");
+            ["name", "category", "points", "authoremail", "date"].forEach(field => {
+                let eachnode = document.createElement("div")
+                if (sp[field]) {
+                    eachnode.appendChild(document.createTextNode(field.charAt(0).toUpperCase() + field.slice(1) + ": " + sp[field]))
+                } else {
+                    eachnode.appendChild(document.createTextNode(field.charAt(0).toUpperCase() + field.slice(1) + ": " + "N/A"))
+                }
+                
+                if (field === "name") {
+                    eachnode.className = "text-gray-200 font-bold text-xl mb-2"
+                } else {
+                    eachnode.className = "text-gray-200 font-bold text-base mb-2 no-underline hover:underline"
+                }
+                
+                node.appendChild(eachnode)
+            })
+            // contentNode.className = "text-gray-200 font-bold text-xl mb-2"
+            // authorNode.className = "text-gray-200 font-bold text-base mb-2 no-underline hover:underline"
+            node.className = "px-6 py-4"
+            wrapperNode.appendChild(node);
+            wrapperNode.className = "w-full max-w-sm rounded overflow-hidden shadow-lg bg-gray-800 text-gray-100 hover:bg-gray-600 m-4"
+            dishBoard.appendChild(wrapperNode);
+        };
+    }
+
+    window.onload = () => {
+        renderDish;
+        let a = document.getElementById("dateFilter")
+        console.log(a)
+        a.addEventListener("change", renderDish)
+    }
+</script>
+
+<body class="bg-gray-800">
+
+    {{ template "navbar" . }}
+
+    <div class="grid place-items-center h-screen">
+        <div class="w-full max-w-xs">
+            <form 
+                class="bg-white shadow-md rounded px-8 pt-6 pb-8 mb-4">
+            <div class="mb-4">
+                <label class="block text-gray-700 text-sm font-bold mb-2" for="name">
+                Name
+                </label>
+                <input 
+                    class="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline" 
+                    id="name" 
+                    name="name"
+                    type="text" 
+                    placeholder="name">
+            </div>
+            <div class="mb-4">
+                <label class="block text-gray-700 text-sm font-bold mb-2" for="category">
+                Category
+                </label>
+                <input 
+                    class="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline" 
+                    id="category" 
+                    name="category"
+                    type="text" 
+                    placeholder="category">
+            </div>
+            <div class="mb-4">
+                <label class="block text-gray-700 text-sm font-bold mb-2" for="points">
+                Points
+                </label>
+                <input 
+                    class="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline" 
+                    id="points" 
+                    name="points"
+                    type="number" 
+                    placeholder="points">
+            </div>
+            <div class="mb-4">
+                <label class="block text-gray-700 text-sm font-bold mb-2" for="date">
+                Date
+                </label>
+                <input 
+                    class="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline" 
+                    id="date" 
+                    name="date"
+                    type="date" 
+                    placeholder="date">
+            </div>
+            <div class="flex items-center justify-between">
+                <button 
+                    class="bg-blue-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded focus:outline-none focus:shadow-outline" 
+                    type="button"
+                    onclick="createDish()">
+                Create
+                </button>
+            </div>
+            </form>
+
+            <div id="dishWrapper">
+                <div class="mb-4">
+                    <label class="block text-gray-700 text-sm font-bold mb-2" for="date">
+                    Date
+                    </label>
+                    <input 
+                        class="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline" 
+                        id="dateFilter" 
+                        name="date"
+                        type="date" 
+                        placeholder="date">
+                </div>
+                <div id="dish">
+
+                </div>
+            </div>
+        </div>
+    </div>
+
+</body>
+</html>
