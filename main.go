@@ -2,20 +2,21 @@ package main
 
 import (
 	"context"
-	"encoding/json"
+	"database/sql"
 	"fmt"
 	"log"
 	"net/http"
 	"net/mail"
 	"os"
+	"time"
 
-	"cloud.google.com/go/firestore"
+	_ "github.com/lib/pq"
+
 	firebase "firebase.google.com/go"
 	"firebase.google.com/go/auth"
 	"github.com/gin-gonic/contrib/sessions"
 	"github.com/gin-gonic/gin"
 	"github.com/joho/godotenv"
-	"google.golang.org/api/iterator"
 	"google.golang.org/api/option"
 )
 
@@ -74,12 +75,11 @@ func main() {
 		log.Fatalln(err)
 	}
 
-	// Create a client instance for Firestore
-	client, err := app.Firestore(ctx)
+	db, err := sql.Open("postgres", "host=127.0.0.1 port=5432 user=ffmanager password=ffmanager dbname=ffmanagerdb sslmode=disable")
+
 	if err != nil {
-		log.Fatalln(err)
+		fmt.Println(err)
 	}
-	defer client.Close()
 
 	// Get an auth client from the firebase.App
 	authClient, authClientErr := CreateFirebaseAuthClient(ctx, app)
@@ -109,7 +109,7 @@ func main() {
 	{
 		// Signup api
 		api.POST("/signup", func(c *gin.Context) {
-			UserSignup(c, authClient, client, ctx)
+			UserSignup(c, authClient, db, ctx)
 		})
 
 		// Signin api
@@ -137,7 +137,7 @@ func main() {
 			json.AuthorEmail = c.Query("authoremail")
 			json.Date = c.Query("date")
 
-			dishes, err := GetDishes(client, ctx, json)
+			dishes, err := GetDishes(db, ctx, json)
 			if err == nil {
 				c.JSON(http.StatusOK, gin.H{
 					"value": dishes,
@@ -150,7 +150,7 @@ func main() {
 		})
 
 		api.POST("/dish", func(c *gin.Context) {
-			CreateDish(c, authClient, client, ctx)
+			CreateDish(c, authClient, db, ctx)
 		})
 
 		api.GET("/signout", UserSignout)
@@ -179,6 +179,8 @@ func main() {
 	})
 
 	r.Run() // listen and serve on 0.0.0.0:8080 (for windows "localhost:8080")
+
+	defer db.Close()
 }
 
 func CreateFirebaseAuthClient(ctx context.Context, app *firebase.App) (*auth.Client, error) {
@@ -186,7 +188,7 @@ func CreateFirebaseAuthClient(ctx context.Context, app *firebase.App) (*auth.Cli
 	return client, err
 }
 
-func UserSignup(c *gin.Context, authClient *auth.Client, client *firestore.Client, ctx context.Context) {
+func UserSignup(c *gin.Context, authClient *auth.Client, db *sql.DB, ctx context.Context) {
 	// バリデーション処理
 	var json UserAuth
 	if err := c.ShouldBindJSON(&json); err != nil {
@@ -213,26 +215,23 @@ func UserSignup(c *gin.Context, authClient *auth.Client, client *firestore.Clien
 	}
 	log.Printf("Successfully created user: %v\n", u)
 
-	// Create user in Firebase
-	if err := CreateUser(client, ctx, u.UID); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-		return
-	}
 	c.JSON(http.StatusOK, gin.H{
 		"message": "successful",
 	})
 }
 
-func CreateUser(client *firestore.Client, ctx context.Context, uid string) error {
+func CreateUser(db *sql.DB, ctx context.Context, uid string) error {
 	fmt.Printf("Create user with uid: %s\n", uid)
 
-	_, _, errInsert := client.Collection("users").Add(ctx, map[string]interface{}{
-		"uid":     uid,
-		"follows": []string{},
-	})
-	if errInsert != nil {
-		log.Fatalf("Failed adding: %v", errInsert)
+	var uidReturn string
+	id := 3
+	err := db.QueryRow("INSERT INTO users(uid, uname) VALUES($1, $2) RETURNING uid", id).Scan(&uidReturn)
+
+	if err != nil {
+		fmt.Println(err)
 	}
+
+	fmt.Println(uidReturn)
 
 	return nil
 }
@@ -310,7 +309,7 @@ func FindUserUidFromSession(c *gin.Context, authClient *auth.Client, ctx context
 	return u.UID, getUserErr
 }
 
-func CreateDish(c *gin.Context, authClient *auth.Client, client *firestore.Client, ctx context.Context) error {
+func CreateDish(c *gin.Context, authClient *auth.Client, db *sql.DB, ctx context.Context) error {
 	var json DishCreateRequest
 	if err := c.ShouldBindJSON(&json); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
@@ -330,50 +329,81 @@ func CreateDish(c *gin.Context, authClient *auth.Client, client *firestore.Clien
 
 	fmt.Printf("Create dish with name: %s author email: %s\n", json.Name, sessionUserEmail)
 
-	_, _, errInsert := client.Collection("dishes").Add(ctx, map[string]interface{}{
-		"name":        json.Name,
-		"UserId":      userUid,
-		"Category":    json.Category,
-		"Points":      json.Points,
-		"authorEmail": sessionUserEmail,
-		"date":        json.Date,
-	})
-	if errInsert != nil {
-		log.Fatalf("Failed adding: %v", errInsert)
-		c.JSON(http.StatusBadRequest, gin.H{"error": errInsert.Error()})
-		return nil
+	tx, errTx := db.Begin()
+
+	if errTx != nil {
+		c.JSON(http.StatusOK, gin.H{"message": errTx.Error()})
+		return errTx
+	}
+
+	var categoryId int
+	queryRowRes := tx.QueryRow("INSERT INTO dishcategory (categoryname) VALUES ($1) on conflict (categoryname) DO UPDATE SET categoryname=EXCLUDED.categoryname  RETURNING categoryid", json.Category).Scan(&categoryId)
+
+	switch {
+	case queryRowRes == sql.ErrNoRows:
+		// TODO:
+		fmt.Printf("対象のレコードは存在しません。: %v", queryRowRes)
+		c.JSON(http.StatusOK, gin.H{"message": queryRowRes.Error()})
+		return queryRowRes
+	case queryRowRes != nil:
+		fmt.Printf("値の取得に失敗しました。: %v", queryRowRes)
+		c.JSON(http.StatusOK, gin.H{"message": queryRowRes.Error()})
+		return queryRowRes
+	default:
+		fmt.Printf("登録ID=%d\n", categoryId)
+	}
+
+	_, errIns2 := tx.Exec(`INSERT INTO dish (dname, demail, registerDate, uid, categoryId, dpoints) 
+	VALUES ($1, $2, $3, $4, $5, $6)
+	on conflict (dname, registerDate, uid) DO NOTHING`, json.Name, sessionUserEmail, json.Date, userUid, categoryId, json.Points)
+
+	if errIns2 != nil {
+		fmt.Println(errIns2.Error())
+		c.JSON(http.StatusOK, gin.H{"message": errIns2.Error()})
+		return errIns2
+	}
+
+	if err := tx.Commit(); err != nil {
+		return err
 	}
 
 	c.JSON(http.StatusOK, gin.H{"message": "successful"})
 	return nil
 }
 
-func GetDishes(client *firestore.Client, ctx context.Context, getDishesParam DishGetRequestParams) ([]Dish, error) {
-	dishes := []Dish{}
+func GetDishes(db *sql.DB, ctx context.Context, getDishesParam DishGetRequestParams) ([]Dish, error) {
 	// var iter *firestore.DocumentIterator
 	fmt.Println(getDishesParam)
 
-	iter := client.Collection("dishes").Where("authorEmail", "==", getDishesParam.AuthorEmail).Where("date", "==", getDishesParam.Date).Documents(ctx)
-
-	for {
-		doc, err := iter.Next()
-		if err == iterator.Done {
-			break
-		}
-
-		// Convert the map to JSON
-		jsonData, _ := json.Marshal(doc.Data())
-
-		// Convert the JSON to a struct
-		var structData Dish
-		json.Unmarshal(jsonData, &structData)
-
-		structData.Id = doc.Ref.ID
-
-		dishes = append(dishes, structData)
+	var queryStatement = `SELECT dname, demail, registerdate, uid, categoryname, dpoints FROM dish INNER JOIN dishcategory ON dish.categoryid = dishcategory.categoryid`
+	var rows *sql.Rows
+	var err error
+	if getDishesParam.AuthorEmail != "" && getDishesParam.Date != "" {
+		queryStatement = queryStatement + " WHERE demail = $1 AND registerdate = $2"
+		rows, err = db.Query(queryStatement, getDishesParam.AuthorEmail, getDishesParam.Date)
+	} else if getDishesParam.AuthorEmail != "" {
+		queryStatement = queryStatement + " WHERE demail = $1"
+		rows, err = db.Query(queryStatement, getDishesParam.AuthorEmail)
+	} else if getDishesParam.Date != "" {
+		queryStatement = queryStatement + " WHERE registerdate = $1"
+		rows, err = db.Query(queryStatement, getDishesParam.Date)
+	} else {
+		rows, err = db.Query(queryStatement)
 	}
 
-	fmt.Println(dishes)
+	if err != nil {
+		fmt.Println(err)
+	}
 
-	return dishes, nil
+	var es []Dish
+	for rows.Next() {
+		var e Dish
+		rows.Scan(&e.Name, &e.AuthorEmail, &e.Date, &e.Id, &e.Category, &e.Points)
+		parsedDate, _ := time.Parse(time.RFC3339, e.Date)
+		fmt.Println(e.Date, parsedDate)
+		e.Date = parsedDate.Format("2006-01-02")
+		es = append(es, e)
+	}
+
+	return es, nil
 }

@@ -78,6 +78,7 @@
     }
 
     async function renderDish() {
+        console.log("called")
         const dish = await getDish();
         console.log(dish)
         const dishBoard = document.getElementById("dish");
@@ -111,10 +112,10 @@
     }
 
     window.onload = () => {
-        renderDish;
         let a = document.getElementById("dateFilter")
         console.log(a)
         a.addEventListener("change", renderDish)
+        renderDish();
     }
 </script>
 
