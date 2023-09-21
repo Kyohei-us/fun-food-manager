@@ -76,7 +76,7 @@ func main() {
 	}
 
 	// user=ffmanager password=ffmanager dbname=ffmanagerdb sslmode=disable
-	db, err := sql.Open("postgres", "host="+os.Getenv("DATABASE_URL")+" port=5432 ")
+	db, err := sql.Open("postgres", os.Getenv("DATABASE_URL"))
 
 	if err != nil {
 		fmt.Println(err)
