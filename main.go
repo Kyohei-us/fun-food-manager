@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/mail"
 	"os"
+	"strconv"
 	"time"
 
 	_ "github.com/lib/pq"
@@ -32,9 +33,9 @@ type DishCreateRequest struct {
 	Date     string `json:"date"`
 }
 
-type DishGetRequestParams struct {
-	AuthorEmail string `json:"authoremail"`
-	Date        string `json:"date"`
+type DishRecordGetRequestParams struct {
+	Uid  string `json:"uid"`
+	Date string `json:"date"`
 }
 
 type Dish struct {
@@ -133,12 +134,22 @@ func main() {
 			})
 		})
 
-		api.GET("/dish", func(c *gin.Context) {
-			var json DishGetRequestParams
-			json.AuthorEmail = c.Query("authoremail")
+		api.GET("/dishrecord", func(c *gin.Context) {
+			var json DishRecordGetRequestParams
+			ownedbyloggedinuser := c.Query("ownedbyloggedinuser")
+			if ownedbyloggedinuser == "" {
+				ownedbyloggedinuser = "false"
+			}
+			ownedbyloggedinuserbool, _ := strconv.ParseBool(ownedbyloggedinuser)
+			if ownedbyloggedinuserbool {
+				json.Uid, _ = FindUserUidFromSession(c, authClient, ctx)
+			} else {
+				json.Uid = ""
+			}
 			json.Date = c.Query("date")
 
-			dishes, err := GetDishes(db, ctx, json)
+			dishes, err := GetDishRecords(authClient, db, ctx, json)
+			fmt.Println(dishes)
 			if err == nil {
 				c.JSON(http.StatusOK, gin.H{
 					"value": dishes,
@@ -150,8 +161,8 @@ func main() {
 			})
 		})
 
-		api.POST("/dish", func(c *gin.Context) {
-			CreateDish(c, authClient, db, ctx)
+		api.POST("/dishrecord", func(c *gin.Context) {
+			CreateDishRecord(c, authClient, db, ctx)
 		})
 
 		api.GET("/signout", UserSignout)
@@ -226,7 +237,7 @@ func CreateUser(db *sql.DB, ctx context.Context, uid string) error {
 
 	var uidReturn string
 	id := 3
-	err := db.QueryRow("INSERT INTO users(uid, uname) VALUES($1, $2) RETURNING uid", id).Scan(&uidReturn)
+	err := db.QueryRow("INSERT INTO users(uid, uemail) VALUES($1, $2) RETURNING uid", id).Scan(&uidReturn)
 
 	if err != nil {
 		fmt.Println(err)
@@ -310,7 +321,7 @@ func FindUserUidFromSession(c *gin.Context, authClient *auth.Client, ctx context
 	return u.UID, getUserErr
 }
 
-func CreateDish(c *gin.Context, authClient *auth.Client, db *sql.DB, ctx context.Context) error {
+func CreateDishRecord(c *gin.Context, authClient *auth.Client, db *sql.DB, ctx context.Context) error {
 	var json DishCreateRequest
 	if err := c.ShouldBindJSON(&json); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
@@ -338,30 +349,59 @@ func CreateDish(c *gin.Context, authClient *auth.Client, db *sql.DB, ctx context
 	}
 
 	var categoryId int
-	queryRowRes := tx.QueryRow("INSERT INTO dishcategory (categoryname) VALUES ($1) on conflict (categoryname) DO UPDATE SET categoryname=EXCLUDED.categoryname  RETURNING categoryid", json.Category).Scan(&categoryId)
+	queryRowRes := tx.QueryRow(`
+		INSERT INTO dishcategory (categoryname)
+		SELECT CAST($1 as varchar(128))
+		WHERE NOT EXISTS (SELECT * FROM dishcategory where categoryname = CAST($1 as varchar(128)))
+		RETURNING categoryid`, json.Category).Scan(&categoryId)
 
 	switch {
 	case queryRowRes == sql.ErrNoRows:
 		// TODO:
-		fmt.Printf("対象のレコードは存在しません。: %v", queryRowRes)
+		fmt.Printf("1対象のレコードは存在しません。: %v", queryRowRes)
 		c.JSON(http.StatusOK, gin.H{"message": queryRowRes.Error()})
 		return queryRowRes
 	case queryRowRes != nil:
-		fmt.Printf("値の取得に失敗しました。: %v", queryRowRes)
+		fmt.Printf("1値の取得に失敗しました。: %v", queryRowRes)
 		c.JSON(http.StatusOK, gin.H{"message": queryRowRes.Error()})
 		return queryRowRes
 	default:
 		fmt.Printf("登録ID=%d\n", categoryId)
 	}
 
-	_, errIns2 := tx.Exec(`INSERT INTO dish (dname, demail, registerDate, uid, categoryId, dpoints) 
-	VALUES ($1, $2, $3, $4, $5, $6)
-	on conflict (dname, registerDate, uid) DO NOTHING`, json.Name, sessionUserEmail, json.Date, userUid, categoryId, json.Points)
+	fmt.Println(categoryId)
 
-	if errIns2 != nil {
-		fmt.Println(errIns2.Error())
+	var dishid int
+	errIns2 := tx.QueryRow(`
+		INSERT INTO dish (dishname, categoryid, dishpoints) 
+		SELECT CAST($1 as varchar(128)), $2, $3
+		WHERE NOT EXISTS (SELECT * FROM dish where dishname = CAST($1 as varchar(128)))
+		RETURNING dishid`, json.Name, categoryId, json.Points).Scan(&dishid)
+
+	switch {
+	case errIns2 == sql.ErrNoRows:
+		// TODO:
+		fmt.Printf("2対象のレコードは存在しません。: %v", errIns2)
 		c.JSON(http.StatusOK, gin.H{"message": errIns2.Error()})
 		return errIns2
+	case errIns2 != nil:
+		fmt.Printf("2値の取得に失敗しました。: %v", errIns2)
+		c.JSON(http.StatusOK, gin.H{"message": errIns2.Error()})
+		return errIns2
+	default:
+		fmt.Printf("登録ID=%d\n", categoryId)
+	}
+
+	_, errIns3 := tx.Exec(`
+		INSERT INTO dishrecord (dishid, uid, registerdate) 
+		SELECT $1, $2, $3
+		WHERE NOT EXISTS (SELECT * FROM dishrecord where dishid = $1 AND uid = CAST($2 as varchar(128)) AND registerdate = CAST($3 as varchar(128)))
+	`, dishid, userUid, json.Date)
+
+	if errIns3 != nil {
+		fmt.Println(3, errIns3.Error())
+		c.JSON(http.StatusOK, gin.H{"message": errIns3.Error()})
+		return errIns3
 	}
 
 	if err := tx.Commit(); err != nil {
@@ -372,19 +412,24 @@ func CreateDish(c *gin.Context, authClient *auth.Client, db *sql.DB, ctx context
 	return nil
 }
 
-func GetDishes(db *sql.DB, ctx context.Context, getDishesParam DishGetRequestParams) ([]Dish, error) {
+func GetDishRecords(authClient *auth.Client, db *sql.DB, ctx context.Context, getDishesParam DishRecordGetRequestParams) ([]Dish, error) {
 	// var iter *firestore.DocumentIterator
 	fmt.Println(getDishesParam)
 
-	var queryStatement = `SELECT dname, demail, registerdate, uid, categoryname, dpoints FROM dish INNER JOIN dishcategory ON dish.categoryid = dishcategory.categoryid`
+	var queryStatement = `SELECT dish.dishname, dishcategory.categoryname, dish.dishpoints, dishrecord.registerdate, dishrecord.uid
+		FROM dishrecord 
+		INNER JOIN dish 
+		ON dishrecord.dishid = dish.dishid
+		INNER JOIN dishcategory 
+		ON dish.categoryid = dishcategory.categoryid`
 	var rows *sql.Rows
 	var err error
-	if getDishesParam.AuthorEmail != "" && getDishesParam.Date != "" {
-		queryStatement = queryStatement + " WHERE demail = $1 AND registerdate = $2"
-		rows, err = db.Query(queryStatement, getDishesParam.AuthorEmail, getDishesParam.Date)
-	} else if getDishesParam.AuthorEmail != "" {
-		queryStatement = queryStatement + " WHERE demail = $1"
-		rows, err = db.Query(queryStatement, getDishesParam.AuthorEmail)
+	if getDishesParam.Uid != "" && getDishesParam.Date != "" {
+		queryStatement = queryStatement + " WHERE uid = $1 AND registerdate = $2"
+		rows, err = db.Query(queryStatement, getDishesParam.Uid, getDishesParam.Date)
+	} else if getDishesParam.Uid != "" {
+		queryStatement = queryStatement + " WHERE dishrecord.uid = $1"
+		rows, err = db.Query(queryStatement, getDishesParam.Uid)
 	} else if getDishesParam.Date != "" {
 		queryStatement = queryStatement + " WHERE registerdate = $1"
 		rows, err = db.Query(queryStatement, getDishesParam.Date)
@@ -399,10 +444,15 @@ func GetDishes(db *sql.DB, ctx context.Context, getDishesParam DishGetRequestPar
 	var es []Dish
 	for rows.Next() {
 		var e Dish
-		rows.Scan(&e.Name, &e.AuthorEmail, &e.Date, &e.Id, &e.Category, &e.Points)
-		parsedDate, _ := time.Parse(time.RFC3339, e.Date)
+		var uid string
+		rows.Scan(&e.Name, &e.Category, &e.Points, &e.Date, &uid)
+		fmt.Println(e.Date)
+		parsedDate, _ := time.Parse("2006-01-02", e.Date)
 		fmt.Println(e.Date, parsedDate)
 		e.Date = parsedDate.Format("2006-01-02")
+		user, _ := authClient.GetUser(ctx, uid)
+		fmt.Println(user)
+		e.AuthorEmail = user.Email
 		es = append(es, e)
 	}
 

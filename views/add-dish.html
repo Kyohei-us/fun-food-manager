@@ -29,7 +29,7 @@
         const points = Number(document.getElementById("points").value);
         const date = document.getElementById("date").value;
 
-        fetch('/api/dish', { 
+        fetch('/api/dishrecord', { 
             method: 'POST',
             body: JSON.stringify({
             "name": name,
@@ -49,28 +49,28 @@
         let res;
         if (authorEmail) {
             if (dateFilter) {
-                res = await fetch('/api/dish?authoremail=' + authorEmail + "&date=" + dateFilter, { 
+                res = await fetch('/api/dishrecord?ownedbyloggedinuser=' + 'true' + "&date=" + dateFilter, { 
                     method: 'GET' 
                 });
             } else {
-                res = await fetch('/api/dish?authoremail=' + authorEmail, { 
+                res = await fetch('/api/dishrecord?ownedbyloggedinuser=' + 'true', { 
                     method: 'GET' 
                 });
             }
         } else {
             if (dateFilter) {
-                res = await fetch('/api/dish?date=' + dateFilter, { 
+                res = await fetch('/api/dishrecord?date=' + dateFilter, { 
                     method: 'GET' 
                 });
             } else {
-                res = await fetch('/api/dish', { 
+                res = await fetch('/api/dishrecord', { 
                     method: 'GET' 
                 }); 
             }
         }
         const dish = await res.json();
 
-        if (dish.error) {
+        if (dish.error || !dish.value) {
             return []
         }
 
