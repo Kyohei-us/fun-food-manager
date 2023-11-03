@@ -38,9 +38,8 @@
             "date": date,
         }) })
             .then((response) => response.json())
-            .then((data) => console.log(data))
+            .then((data) => {console.log(data)})
             .catch(error => console.error(error));
-        // window.location.replace("/");
     }
 
     async function getDish() {
@@ -107,9 +106,18 @@
             // authorNode.className = "text-gray-200 font-bold text-base mb-2 no-underline hover:underline"
             node.className = "px-6 py-4"
             wrapperNode.appendChild(node);
-            wrapperNode.className = "w-full max-w-sm rounded overflow-hidden shadow-lg bg-gray-800 text-gray-100 hover:bg-gray-600 m-4"
+            wrapperNode.className = "w-full max-w-sm rounded overflow-hidden shadow-lg bg-gray-800 text-gray-100 hover:bg-gray-600 m-4 border"
             dishBoard.appendChild(wrapperNode);
         };
+    }
+
+    async function renderCreateDishRecordForm() {
+        var createdishrecordform = document.getElementById("createdishrecordform");
+        var createdishrecordformmessage = document.getElementById("createdishrecordformmessage")
+        if (await CheckCurrentUser() == "") {
+            createdishrecordform.classList.add("hidden")
+            createdishrecordformmessage.classList.remove("hidden")
+        } 
     }
 
     window.onload = () => {
@@ -117,6 +125,7 @@
         console.log(a)
         a.addEventListener("change", renderDish)
         renderDish();
+        renderCreateDishRecordForm()
     }
 </script>
 
@@ -126,7 +135,8 @@
 
     <div class="grid place-items-center h-screen">
         <div class="w-full max-w-xs">
-            <form 
+            <form
+                id="createdishrecordform" 
                 class="bg-white shadow-md rounded px-8 pt-6 pb-8 mb-4">
             <div class="mb-4">
                 <label class="block text-gray-700 text-sm font-bold mb-2" for="name">
@@ -181,6 +191,8 @@
                 </button>
             </div>
             </form>
+
+            <p id="createdishrecordformmessage" class="hidden text-white">Please log in to create your dish record!</p>
 
             <div id="dishWrapper">
                 <div class="mb-4">
