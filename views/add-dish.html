@@ -82,6 +82,7 @@
         const dish = await getDish();
         console.log(dish)
         const dishBoard = document.getElementById("dish");
+        dishBoard.innerHTML = '';
 
         for (const sp of dish) {
             const wrapperNode = document.createElement("div");
