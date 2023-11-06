@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, minimum-scale=1" />
+    <title>My Stats</title>
+
+    <!-- Load Tailwindcss -->
+    <link href="/static/output.css" rel="stylesheet">
+    <script type="module" src="/static/lib.js"></script>
+</head>
+
+<script>
+    async function getMyDishRecordsByWeek() {
+        const fromdateFilter = document.getElementById("fromdateFilter").value;
+        const todateFilter = document.getElementById("todateFilter").value;
+        const authorEmail = await CheckCurrentUser();
+        let res;
+        if (authorEmail) {
+            if (fromdateFilter && todateFilter) {
+                console.log(fromdateFilter, todateFilter)
+                res = await fetch('/api/mydishrecordsbyweek?ownedbyloggedinuser=' + 'true' + "&fromdate=" + fromdateFilter + "&todate=" + todateFilter, { 
+                    method: 'GET' 
+                });
+            } else {
+                res = await fetch('/api/mydishrecordsbyweek?ownedbyloggedinuser=' + 'true', { 
+                    method: 'GET' 
+                });
+            }
+        } else {
+            return []
+        }
+        const dish = await res.json();
+
+        if (dish.error || !dish.value) {
+            return []
+        }
+
+        return dish.value
+    }
+
+    async function renderDish() {
+        const dish = await getMyDishRecordsByWeek();
+        console.log(dish)
+        const dishBoard = document.getElementById("dish");
+        dishBoard.innerHTML = '';
+
+        for (const week of dish) {
+            const weekWrapperNode = document.createElement("div");
+            for (const sp of week) {
+                const wrapperNode = document.createElement("div");
+                const node = document.createElement("div");
+                ["name", "category", "points", "authoremail", "date"].forEach(field => {
+                    let eachnode = document.createElement("div")
+                    if (sp[field]) {
+                        eachnode.appendChild(document.createTextNode(field.charAt(0).toUpperCase() + field.slice(1) + ": " + sp[field]))
+                    } else {
+                        eachnode.appendChild(document.createTextNode(field.charAt(0).toUpperCase() + field.slice(1) + ": " + "N/A"))
+                    }
+                    
+                    if (field === "name") {
+                        eachnode.className = "text-gray-200 font-bold text-xl mb-2"
+                    } else {
+                        eachnode.className = "text-gray-200 font-bold text-base mb-2 no-underline hover:underline"
+                    }
+                    
+                    node.appendChild(eachnode)
+                })
+                // contentNode.className = "text-gray-200 font-bold text-xl mb-2"
+                // authorNode.className = "text-gray-200 font-bold text-base mb-2 no-underline hover:underline"
+                node.className = "px-6 py-4"
+                wrapperNode.appendChild(node);
+                wrapperNode.className = "w-full max-w-sm rounded overflow-hidden shadow-lg bg-gray-800 text-gray-100 hover:bg-gray-600 m-4 border"
+                weekWrapperNode.appendChild(wrapperNode);
+            };
+            weekWrapperNode.className = "w-full max-w-sm rounded overflow-hidden shadow-lg bg-gray-800 text-gray-100 hover:bg-gray-600 m-4 border"
+            dishBoard.appendChild(weekWrapperNode);
+        }
+    }
+
+    window.onload = () => {
+        let a = document.getElementById("fromdateFilter")
+        console.log(a)
+        a.addEventListener("change", renderDish)
+        let b = document.getElementById("todateFilter")
+        console.log(b)
+        b.addEventListener("change", renderDish)
+        renderDish();
+    }
+</script>
+
+<body class="bg-gray-800">
+
+    {{ template "navbar" . }}
+
+    <div id="dishWrapper">
+        <div class="mb-4">
+            <label class="block text-gray-700 text-sm font-bold mb-2" for="date">
+            From Date
+            </label>
+            <input 
+                class="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline" 
+                id="fromdateFilter" 
+                name="date"
+                type="date" 
+                placeholder="date">
+        </div>
+        <div class="mb-4">
+            <label class="block text-gray-700 text-sm font-bold mb-2" for="date">
+            To Date
+            </label>
+            <input 
+                class="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline" 
+                id="todateFilter" 
+                name="date"
+                type="date" 
+                placeholder="date">
+        </div>
+        <div id="dish">
+
+        </div>
+    </div>
+</body>
+</html>

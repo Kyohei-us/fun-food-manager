@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/mail"
 	"os"
+	"sort"
 	"strconv"
 	"time"
 
@@ -34,8 +35,10 @@ type DishCreateRequest struct {
 }
 
 type DishRecordGetRequestParams struct {
-	Uid  string `json:"uid"`
-	Date string `json:"date"`
+	Uid      string `json:"uid"`
+	Date     string `json:"date"`
+	FromDate string `json:"fromdate"`
+	ToDate   string `json:"todate"`
 }
 
 type Dish struct {
@@ -165,6 +168,67 @@ func main() {
 			CreateDishRecord(c, authClient, db, ctx)
 		})
 
+		api.GET("/mydishrecordsbyweek", func(c *gin.Context) {
+			var json DishRecordGetRequestParams
+			ownedbyloggedinuserbool := true
+			if ownedbyloggedinuserbool {
+				json.Uid, _ = FindUserUidFromSession(c, authClient, ctx)
+			} else {
+				json.Uid = ""
+			}
+			json.FromDate = c.Query("fromdate")
+			json.ToDate = c.Query("todate")
+
+			dishes, err := GetDishRecords(authClient, db, ctx, json)
+			fmt.Println(dishes)
+
+			sort.Slice(dishes, func(i, j int) bool {
+				parsedDatei, _ := time.Parse("2006-01-02", dishes[i].Date)
+				parsedDatej, _ := time.Parse("2006-01-02", dishes[j].Date)
+				return parsedDatei.Before(parsedDatej)
+			})
+
+			dishRecordsByWeekArray := [][]Dish{}
+			weekStarting, _ := time.Parse("2006-01-02", dishes[0].Date)
+			tempWeek := []Dish{}
+			for i := 0; i < len(dishes); i++ {
+				fmt.Println(i, weekStarting)
+				if i == 0 {
+					tempWeek = append(tempWeek, dishes[i])
+					continue
+				}
+				dateTemp, _ := time.Parse("2006-01-02", dishes[i].Date)
+				if dateTemp.Before(weekStarting.AddDate(0, 0, 7)) {
+					tempWeek = append(tempWeek, dishes[i])
+					if i == len(dishes)-1 {
+						dishRecordsByWeekArray = append(dishRecordsByWeekArray, tempWeek)
+						break
+					}
+				} else {
+					if len(tempWeek) == 0 {
+						i -= 1
+						weekStarting = weekStarting.AddDate(0, 0, 7)
+						continue
+					}
+					dishRecordsByWeekArray = append(dishRecordsByWeekArray, tempWeek)
+					tempWeek = []Dish{}
+					i -= 1
+					weekStarting = weekStarting.AddDate(0, 0, 7)
+					continue
+				}
+			}
+
+			if err == nil {
+				c.JSON(http.StatusOK, gin.H{
+					"value": dishRecordsByWeekArray,
+				})
+				return
+			}
+			c.JSON(http.StatusOK, gin.H{
+				"message": "error",
+			})
+		})
+
 		api.GET("/signout", UserSignout)
 	}
 
@@ -182,6 +246,10 @@ func main() {
 
 	r.GET("/add-dish", func(c *gin.Context) {
 		c.HTML(http.StatusOK, "add-dish.html", gin.H{})
+	})
+
+	r.GET("/mystats", func(c *gin.Context) {
+		c.HTML(http.StatusOK, "mystats.html", gin.H{})
 	})
 
 	r.NoRoute(func(c *gin.Context) {
@@ -339,7 +407,7 @@ func CreateDishRecord(c *gin.Context, authClient *auth.Client, db *sql.DB, ctx c
 		c.JSON(http.StatusBadRequest, gin.H{"error": uidErr.Error()})
 	}
 
-	fmt.Printf("Create dish with name: %s author email: %s\n", json.Name, sessionUserEmail)
+	fmt.Printf("Create dish with name: %s category: %s author email: %s\n", json.Name, json.Category, sessionUserEmail)
 
 	tx, errTx := db.Begin()
 
@@ -358,9 +426,16 @@ func CreateDishRecord(c *gin.Context, authClient *auth.Client, db *sql.DB, ctx c
 	switch {
 	case queryRowRes == sql.ErrNoRows:
 		// TODO:
+
+		rows, _ := tx.Query(`SELECT categoryid FROM dishcategory WHERE categoryname = $1`, json.Category)
+		if rows.Next() {
+			rows.Scan(&categoryId)
+		}
+		rows.Close()
+
 		fmt.Printf("1対象のレコードは存在しません。: %v", queryRowRes)
-		c.JSON(http.StatusOK, gin.H{"message": queryRowRes.Error()})
-		return queryRowRes
+		// c.JSON(http.StatusOK, gin.H{"message": queryRowRes.Error()})
+		// return queryRowRes
 	case queryRowRes != nil:
 		fmt.Printf("1値の取得に失敗しました。: %v", queryRowRes)
 		c.JSON(http.StatusOK, gin.H{"message": queryRowRes.Error()})
@@ -368,8 +443,6 @@ func CreateDishRecord(c *gin.Context, authClient *auth.Client, db *sql.DB, ctx c
 	default:
 		fmt.Printf("登録ID=%d\n", categoryId)
 	}
-
-	fmt.Println(categoryId)
 
 	var dishid int
 	errIns2 := tx.QueryRow(`
@@ -389,7 +462,7 @@ func CreateDishRecord(c *gin.Context, authClient *auth.Client, db *sql.DB, ctx c
 		c.JSON(http.StatusOK, gin.H{"message": errIns2.Error()})
 		return errIns2
 	default:
-		fmt.Printf("登録ID=%d\n", categoryId)
+		fmt.Printf("登録ID=%d\n", dishid)
 	}
 
 	_, errIns3 := tx.Exec(`
@@ -414,7 +487,7 @@ func CreateDishRecord(c *gin.Context, authClient *auth.Client, db *sql.DB, ctx c
 
 func GetDishRecords(authClient *auth.Client, db *sql.DB, ctx context.Context, getDishesParam DishRecordGetRequestParams) ([]Dish, error) {
 	// var iter *firestore.DocumentIterator
-	fmt.Println(getDishesParam)
+	fmt.Println("start getDishRecords: ", getDishesParam.Uid, getDishesParam.Date, getDishesParam.FromDate, getDishesParam.ToDate)
 
 	var queryStatement = `SELECT dish.dishname, dishcategory.categoryname, dish.dishpoints, dishrecord.registerdate, dishrecord.uid
 		FROM dishrecord 
@@ -427,6 +500,9 @@ func GetDishRecords(authClient *auth.Client, db *sql.DB, ctx context.Context, ge
 	if getDishesParam.Uid != "" && getDishesParam.Date != "" {
 		queryStatement = queryStatement + " WHERE uid = $1 AND registerdate = $2"
 		rows, err = db.Query(queryStatement, getDishesParam.Uid, getDishesParam.Date)
+	} else if getDishesParam.Uid != "" && getDishesParam.FromDate != "" && getDishesParam.ToDate != "" {
+		queryStatement = queryStatement + " WHERE uid = $1 AND TO_DATE(registerdate, 'YYYY-MM-DD') >= $2 AND TO_DATE(registerdate, 'YYYY-MM-DD') <= $3"
+		rows, err = db.Query(queryStatement, getDishesParam.Uid, getDishesParam.FromDate, getDishesParam.ToDate)
 	} else if getDishesParam.Uid != "" {
 		queryStatement = queryStatement + " WHERE dishrecord.uid = $1"
 		rows, err = db.Query(queryStatement, getDishesParam.Uid)

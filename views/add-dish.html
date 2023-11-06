@@ -8,21 +8,10 @@
 
     <!-- Load Tailwindcss -->
     <link href="/static/output.css" rel="stylesheet">
+    <script type="module" src="/static/lib.js"></script>
 </head>
 
 <script>
-  async function CheckCurrentUser() {
-    const res = await fetch('/api/is-logged-in', { 
-            method: 'GET' 
-        });
-    const currUser = await res.json();
-    if (currUser.currentUserEmail) {
-      return currUser.currentUserEmail
-    } else {
-      return ""
-    }
-  }
-
     function createDish() {
         const name = document.getElementById("name").value;
         const category = document.getElementById("category").value;
